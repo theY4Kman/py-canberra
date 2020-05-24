@@ -44,4 +44,7 @@ Oftentimes, if libcanberra is installed, some default system sounds will be inst
     import canberra
     canberra.play(event_id='bell')
 
+    import time
+    time.sleep(0.5)  # wait for the sound to finish playing
+
 This plays ``/usr/share/sounds/freedesktop/stereo/bell.oga`` on the default output device.
