@@ -1,0 +1,25 @@
+version: '3.7'
+
+
+x-plat-builder: &plat-builder
+  volumes:
+    - ../:/src
+
+  working_dir: /src
+  command: ./packaging/build-wheels.sh
+  user: '${UID:-1000}'
+
+
+services:
+
+  manylinux2014_x86_64:
+    <<: *plat-builder
+    build:
+      context: ./platforms
+      dockerfile: manylinux2014_x86_64.Dockerfile
+
+  manylinux2014_i686:
+    <<: *plat-builder
+    build:
+      context: ./platforms
+      dockerfile: manylinux2014_i686.Dockerfile

@@ -1,0 +1,9 @@
+/build
+/dist
+*.egg-info/
+
+*.pyc
+
+cython_debug/
+*.c
+*.so
