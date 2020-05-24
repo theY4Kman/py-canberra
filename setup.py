@@ -24,8 +24,7 @@ setup(
     url='https://github.com/theY4Kman/py-canberra',
     python_requires='==3.*,>=3.6.0',
     project_urls={
-        'homepage': 'https://github.com/theY4Kman/py-canberra',
-        'repository': 'https://github.com/theY4Kman/py-canberra',
+        'Repository': 'https://github.com/theY4Kman/py-canberra',
     },
     author='Zach "theY4Kman" Kanzler',
     author_email='they4kman@gmail.com',
@@ -38,4 +37,15 @@ setup(
             sources=['canberra/_canberra.pyx'],
         ),
     ]),
+    classifiers=[
+        'Development Status :: 3 - Alpha',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: POSIX :: Linux',
+        'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'Topic :: Multimedia :: Sound/Audio',
+    ],
 )
