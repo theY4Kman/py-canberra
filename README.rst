@@ -1,6 +1,9 @@
 py-canberra
 ===========
 
+.. image:: https://badge.fury.io/py/py-canberra.svg
+    :target: https://badge.fury.io/py/py-canberra
+
 py-canberra is a Python interface to the `libcanberra <http://0pointer.de/lennart/projects/libcanberra/>`_ sound-playing library for Linux.
 
 
