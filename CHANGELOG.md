@@ -8,8 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [0.0.4] - 2020-05-24
-### Added
- - Include stubs for Cython extension module
 ### Changed
  - Include documentation links in README and PyPI package page
 
