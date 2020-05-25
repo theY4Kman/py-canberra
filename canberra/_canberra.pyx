@@ -1,9 +1,11 @@
 # distutils: language = c
 # cython: language_level=3
+
+from queue import Queue
+from threading import Event, Thread
 from typing import Any, Callable, Dict, Union
 
 from cpython.object cimport PyObject
-from cpython.pylifecycle cimport Py_IsInitialized
 from cpython.pystate cimport PyGILState_STATE, PyGILState_Ensure, PyGILState_Release
 from cpython.ref cimport Py_INCREF, Py_DECREF
 from libc.stdint cimport uint32_t
@@ -122,29 +124,63 @@ cdef void ca_finish_callback(ca_context *ca, uint32_t id, int error_code, void *
 
     free(userdata)
 
+    error = Errors(error_code)
+    if error != Errors.SUCCESS:
+        error = CanberraError(code=error)
+
+    gilstate = PyGILState_Ensure()
     try:
-        # If the Python runtime has finished, calling a Python function
-        # will result in a fatal error
-        if not Py_IsInitialized():
-            return
-
-        if callback is not None:
-            error = Errors(error_code)
-            if error != Errors.SUCCESS:
-                error = CanberraError(code=error)
-
-            gilstate = PyGILState_Ensure()
-            try:
-                if callback_arg is not NOTSET:
-                    callback(context, id, error, callback_arg)
-                else:
-                    callback(context, id, error)
-            finally:
-                PyGILState_Release(gilstate)
+        #
+        # ca_finish_callbacks are not allowed to call libcanberra API functions,
+        # as they may cause deadlocks (or fatal errors).
+        #
+        # We must be especially careful with DECREFing in the ca_finish_callback,
+        # as well, for if the Context gets GC'd during this callback,
+        # ca_context_destroy will be called on it, undoubtedly causing a fatal
+        # error.
+        #
+        # So, instead of invoking user callbacks or DECREFing our context
+        # directly from the ca_finish_callback, we queue these to be run in a
+        # separate callback thread.
+        #
+        callback_queue.put_nowait((callback, context, id, error, callback_arg))
     finally:
-        Py_DECREF(context)
-        Py_DECREF(callback)
-        Py_DECREF(callback_arg)
+        PyGILState_Release(gilstate)
+
+
+cdef callback_processor():
+    cdef object callback
+    cdef object context
+    cdef uint32_t id
+    cdef object error
+    cdef object callback_arg
+
+    while True:
+        callback, context, id, error, callback_arg = callback_queue.get()
+
+        try:
+            if callback is not None:
+                if callback_arg is NOTSET:
+                    args = (context, id, error)
+                else:
+                    args = (context, id, error, callback_arg)
+
+                callback(*args)
+        finally:
+            Py_DECREF(context)
+            Py_DECREF(callback)
+            Py_DECREF(callback_arg)
+
+            del context
+            del callback
+            del callback_arg
+            del error
+
+
+cdef callback_queue = Queue()
+cdef callback_thread_canceled = Event()
+cdef callback_thread = Thread(name='py-canberra callback thread', target=callback_processor, daemon=True)
+callback_thread.start()
 
 
 OnFinishedCallbackWithoutArg = Callable[['Context', int, Union[Errors, CanberraError]], Any]
