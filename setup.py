@@ -25,6 +25,7 @@ setup(
     python_requires='==3.*,>=3.6.0',
     project_urls={
         'Repository': 'https://github.com/theY4Kman/py-canberra',
+        'Documentation': 'https://py-canberra.readthedocs.io/',
     },
     author='Zach "theY4Kman" Kanzler',
     author_email='they4kman@gmail.com',

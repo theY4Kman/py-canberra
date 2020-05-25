@@ -2,9 +2,14 @@ py-canberra
 ===========
 
 .. image:: https://badge.fury.io/py/py-canberra.svg
-    :target: https://badge.fury.io/py/py-canberra
+   :target: https://badge.fury.io/py/py-canberra
+.. image:: https://readthedocs.org/projects/py-canberra/badge/?version=latest
+   :target: https://py-canberra.readthedocs.io/en/latest/?badge=latest
+   :alt: Documentation Status
 
 py-canberra is a Python interface to the `libcanberra <http://0pointer.de/lennart/projects/libcanberra/>`_ sound-playing library for Linux.
+
+Full documentation is available `here <https://py-canberra.readthedocs.io/en/latest/>`_
 
 
 Dependencies
