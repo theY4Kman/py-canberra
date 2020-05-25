@@ -30,6 +30,7 @@ setup(
     author_email='they4kman@gmail.com',
     license='MIT',
     packages=['canberra'],
+    package_data={'canberra': ['_canberra.pyi']},
     extras_require={"dev": ["cython==0.*,>=0.29.19"]},
     ext_modules=cythonize([
         Extension(

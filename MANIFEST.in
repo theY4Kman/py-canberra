@@ -1,2 +1,3 @@
-global-include *.py *.pxd *.pyx
+global-include *.py *.pxd *.pyx *.pyi
 global-exclude *.so
+prune docs
