@@ -12,7 +12,8 @@ from libc.stdint cimport uint32_t
 from libc.stdlib cimport malloc, free
 from posix.dlfcn cimport dlopen, RTLD_NOW, RTLD_GLOBAL, dlsym
 
-from .constants import Props, Errors
+from .constants import Props, Errors, NOTSET
+
 
 cdef extern from 'canberra.h':
     ctypedef struct ca_context:
@@ -20,6 +21,7 @@ cdef extern from 'canberra.h':
 
     ctypedef struct ca_proplist:
         pass
+
 
 cdef:
     enum:
@@ -67,6 +69,7 @@ cdef:
 
     ctypedef const char *(*ca_strerror_t)(int code);
 
+
 cdef:
     void *libcanberra = dlopen('libcanberra.so', RTLD_NOW | RTLD_GLOBAL)
 
@@ -91,10 +94,9 @@ cdef:
     ca_strerror_t ca_strerror                                   = <ca_strerror_t>dlsym(libcanberra, 'ca_strerror')
 
 
-NOTSET = object()
-
-
 class CanberraError(Exception):
+    """Exception raised when a libcanberra API call returns an error"""
+
     def __init__(self, code: Union[int, Errors], msg: str = None):
         self.code = Errors(code)
 
@@ -199,10 +201,14 @@ cdef populate_propslist(ca_proplist *proplist,
     prop_values = Props.from_kwargs(props, **other_props)
 
     for prop, value in prop_values.items():
+        #
+        # libcanberra property names need to be in 7bit ASCII, string
+        # property values UTF8.
+        #
         b_prop = str(prop).encode('ascii')
         c_prop = b_prop
 
-        b_value = str(value).encode('ascii')
+        b_value = str(value).encode('utf-8')
         c_value = b_value
 
         error = ca_proplist_sets(proplist, c_prop, c_value)
@@ -210,6 +216,8 @@ cdef populate_propslist(ca_proplist *proplist,
 
 
 cdef class Context:
+    """A libcanberra ``ca_context``"""
+
     cdef ca_context *_ca_ctx
 
     def __cinit__(self):
@@ -226,28 +234,95 @@ cdef class Context:
             ca_context_destroy(self._ca_ctx)
 
     def __init__(self, props: Dict[Union[str, Props], str] = None, **other_props: str):
+        """Initialize the libcanberra ca_context, optionally with default props all sounds will share
+
+        :param props:
+            A mapping of Props to values. These properties and values will be set
+            as defaults for all sounds played from this context.
+
+        :param other_props:
+            Props may also be passed as kwargs, where ``{Props.EVENT_ID: 'bell'}`` may
+            be passed as ``event_id='bell'``. These properties and values will be set
+            as defaults for all sounds played from this context.
+
+        """
         if props or other_props:
             self.change_props(props, **other_props)
 
-    def set_driver(self, driver: Union[str, bytes]):
+    def set_driver(self, driver: Union[str, bytes]) -> None:
+        """Specify the backend driver used
+
+        This method may not be called again after a successful call to :meth:`open`,
+        which occurs implicitly when calling :meth:`.play`.
+
+        This method might succeed even when the specified driver backend is not
+        available. Use :meth:`open` to find out whether the backend is available.
+
+        :param driver:
+            The backend driver to use (e.g. ``"alsa"``, ``"pulse"``, ``"null"``, ...)
+
+        """
         driver_bytes = driver if isinstance(driver, bytes) else driver.encode('utf-8')
         cdef char *c_driver = driver_bytes
 
         cdef int error = ca_context_set_driver(self._ca_ctx, c_driver)
         raise_if_error(error)
 
-    def change_device(self, device: Union[str, bytes]):
+    def change_device(self, device: Union[str, bytes]) -> None:
+        """Specify the backend device to use
+
+        This method may not be called again after a successful call to :meth:`open`,
+        which occurs implicitly when calling :meth:`.play`.
+
+        This method might succeed even when the specified driver backend is not
+        available. Use :meth:`open` to find out whether the backend is available.
+
+        Depending on the backend used, this might or might not cause all
+        currently playing event sounds to be moved to the new device.
+
+        :param device:
+            The backend device to use, in a format that is specific to the backend
+
+        """
         device_bytes = device if isinstance(device, bytes) else device.encode('utf-8')
         cdef char *c_device = device_bytes
 
         cdef int error = ca_context_change_device(self._ca_ctx, c_device)
         raise_if_error(error)
 
-    def open(self):
+    def open(self) -> None:
+        """Connect the context to the sound system.
+
+        This is implicitly called in :meth:`.play` or :meth:`cache` if not called
+        explicitly. It is recommended to initialize application properties
+        with :meth:`change_props` (or when creating :class:`Context`)
+        before calling this function.
+
+        """
         cdef int error = ca_context_open(self._ca_ctx)
         raise_if_error(error)
 
-    def change_props(self, props: Dict[Union[str, Props], str] = None, **other_props: str):
+    def change_props(self, props: Dict[Union[str, Props], str] = None, **other_props: str) -> None:
+        """Write one or more string properties to the Context
+
+        Properties set like this will be attached to both the client object of
+        the sound server and to all event sounds played or cached. It is
+        recommended to call this method at least once before calling :meth:`open`
+        (which occurs implicitly when calling :meth:`.play`), so that the
+        initial application properties are set properly before the initial
+        connection to the sound system.
+
+        This method can be called both before and after the :meth:`open` call.
+        Properties that have already been set before will be overwritten.
+
+        :param props:
+            A mapping of :class:`Props` to values.
+
+        :param other_props:
+            :class:`Props` may also be passed as kwargs, where
+            ``{Props.EVENT_ID: 'bell'}`` is passed as ``event_id='bell'``.
+
+        """
         cdef int error
         cdef ca_proplist *proplist
 
@@ -263,6 +338,40 @@ cdef class Context:
         finally:
             ca_proplist_destroy(proplist)
 
+    def cache(self, props: Dict[Union[str, Props], str] = None, **other_props: str) -> None:
+        """Upload the specified sample into the audio server and attach the specified properties to it
+
+        This method will only return after the sample upload was finished.
+
+        The sound to cache is found with the same algorithm that is used to
+        find the sounds for :meth:`.play`.
+
+        If the backend doesn't support caching sound samples, this method
+        will raise a :exc:`CanberraError` with a ``code`` of :attr:`.NOTSUPPORTED`.
+
+        :param props:
+            A mapping of :class:`Props` to values.
+
+        :param other_props:
+            :class:`Props` may also be passed as kwargs, where
+            ``{Props.EVENT_ID: 'bell'}`` is passed as ``event_id='bell'``.
+
+        """
+        cdef int error
+        cdef ca_proplist *proplist
+
+        error = ca_proplist_create(&proplist)
+        raise_if_error(error)
+
+        try:
+            populate_propslist(proplist, props, other_props)
+
+            error = ca_context_cache_full(self._ca_ctx, proplist)
+            raise_if_error(error)
+
+        finally:
+            ca_proplist_destroy(proplist)
+
     def play(
         self,
         props: Dict[Union[str, Props], str] = None,
@@ -270,7 +379,74 @@ cdef class Context:
         on_finished: OnFinishedCallback = None,
         user_data = NOTSET,
         **other_props: str,
-    ):
+    ) -> None:
+        """Play one event sound
+
+        ``id`` can be any numeric value which later can be used to cancel an
+        event sound that is currently being played. You may use the same ``id``
+        twice or more times if you want to cancel multiple event sounds with
+        a single :meth:`cancel` call. It is recommended to pass ``0`` (the default)
+        for the ``id`` if the event sound shall never be canceled.
+
+        If the requested sound is not cached in the server yet, this call might
+        result in the sample being uploaded temporarily or permanently
+        (this may be controlled with :attr:`.CANBERRA_CACHE_CONTROL`).
+
+        This method will start playback in the background. It will not wait to
+        return until playback completed. Depending on the backend used, a sound
+        that is started shortly before your application terminates might or
+        might not continue to play after your application terminated. If you
+        want to make sure that all sounds finish to play, you need to pass an
+        :paramref:`on_finished <Context.play.on_finished>` callback and wait
+        for it to be called before you terminate your application.
+
+        The sample to play is identified by the :attr:`.EVENT_ID` property.
+        If it is already cached in the server the cached version is played.
+        The properties passed in this call are merged with the properties
+        supplied when the sample was cached (if applicable) and the context
+        properties as set with :meth:`change_props`.
+
+        If :attr:`.EVENT_ID` is not defined, the sound file passed in the
+        :attr:`.MEDIA_FILENAME` is played.
+
+        On Linux/Unix, the right sound to play is determined according to
+        :attr:`.EVENT_ID`, :attr:`.APPLICATION_LANGUAGE`/:attr:`.MEDIA_LANGUAGE`,
+        the system locale, :attr:`.CANBERRA_XDG_THEME_NAME` and
+        :attr:`.CANBERRA_XDG_THEME_OUTPUT_PROFILE`, following the XDG Sound
+        Theming Specification. On non-Unix systems, the native event sound
+        that matches the XDG sound name in :attr:`.EVENT_ID` is played.
+
+        :param props:
+            A mapping of :class:`Props` to values describing additional
+            properties for this sound event.
+
+        :param id:
+            An integer id this sound can later be identified with when calling
+            :meth:`.cancel`
+
+        :param on_finished:
+            An optional callback to be called when the sound finishes playing.
+            Depending on whether :paramref:`.user_data` is passed, the prototype
+            for this callback will be:
+
+            .. code-block:: python
+
+                # without user_data
+                def callback(ctx: Context, id: int, error: Union[CanberraError, Errors])
+
+                # with user_data
+                def callback(ctx: Context, id: int, error: Union[CanberraError, Errors], user_data: Any)
+
+        :param user_data:
+            An optional argument to be passed to the
+            :paramref:`on_finished <Context.play.on_finished>` callback
+
+        :param other_props:
+            :class:`Props` may also be passed as kwargs, where ``{Props.EVENT_ID: 'bell'}``
+            is passed as ``event_id='bell'``, which describe additional
+            properties for this sound event.
+
+        """
         cdef int error
         cdef ca_proplist *proplist
         cdef PyObject **ca_userdata
@@ -287,12 +463,16 @@ cdef class Context:
             ca_userdata[2] = <PyObject *>user_data
 
             Py_INCREF(self)
-            Py_INCREF(self)
             Py_INCREF(on_finished)
             Py_INCREF(user_data)
 
             error = ca_context_play_full(self._ca_ctx, id, proplist, ca_finish_callback, <void *>ca_userdata)
             if error != CA_SUCCESS:
+                #
+                # If the call is not successful, our ca_finish_callback will not
+                # be called, so we must free our memory and decrement our references
+                # now.
+                #
                 free(ca_userdata)
 
                 Py_DECREF(self)
@@ -304,29 +484,33 @@ cdef class Context:
         finally:
             ca_proplist_destroy(proplist)
 
-    def cache(self, props: Dict[Union[str, Props], str] = None, **other_props: str):
-        cdef int error
-        cdef ca_proplist *proplist
+    def cancel(self, uint32_t id = 0) -> None:
+        """Cancel one or more event sounds that have been started via :meth:`.play`
 
-        error = ca_proplist_create(&proplist)
-        raise_if_error(error)
+        If callback function was passed to :meth:`.play` when starting the sound,
+        calling :meth:`.cancel` might cause this callback function to be called
+        with :attr:`.CANCELED` as the error code (wrapped in :exc:`CanberraError`).
 
-        try:
-            populate_propslist(proplist, props, other_props)
+        :param id:
+            The ID that identifies the sound(s) to cancel.
 
-            error = ca_context_cache_full(self._ca_ctx, proplist)
-            raise_if_error(error)
-
-        finally:
-            ca_proplist_destroy(proplist)
-
-    def cancel(self, uint32_t id = 0):
+        """
         cdef int error
 
         error = ca_context_cancel(self._ca_ctx, id)
         raise_if_error(error)
 
     def playing(self, uint32_t id = 0) -> bool:
+        """Check if at least one sound with the specified id is still playing
+
+        :param id:
+            The ID that identifies the sound(s) to check
+
+        :return:
+            ``True`` if at least one sound with the specified ID is still playing,
+            and ``False`` if no sounds with the specified ID are still playing
+
+        """
         cdef int error
         cdef int playing
 

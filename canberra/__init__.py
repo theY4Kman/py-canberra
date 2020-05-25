@@ -1,8 +1,8 @@
 __version__ = '0.0.1'
 
 from .constants import Props, Errors
-from .convenience import play, play_file
 from ._canberra import Context
+from .convenience import play, play_file
 
 
 __all__ = [
